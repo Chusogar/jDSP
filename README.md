@@ -24,6 +24,17 @@ keeping the dsp-cpp layout:
 
 To add another machine follow [docs/adding-a-driver.md](docs/adding-a-driver.md).
 
+## Download
+
+Prebuilt runnable JAR (JDK 17+):
+
+https://github.com/Chusogar/jDSP/raw/cursor/pirates-bagman-java-a9b4/jdsp.jar
+
+```bash
+curl -L -o jdsp.jar https://github.com/Chusogar/jDSP/raw/cursor/pirates-bagman-java-a9b4/jdsp.jar
+java -jar jdsp.jar --game pirates /path/to/pirates.zip
+```
+
 ## Building
 
 Requirements: JDK 17+ (Maven 3.6+ optional).
