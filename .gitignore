@@ -1,0 +1,15 @@
+target/
+sources.txt
+*.class
+*.bmp
+*.png
+!screenshots/
+!screenshots/*.png
+*.wav
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+roms/
+__pycache__/
