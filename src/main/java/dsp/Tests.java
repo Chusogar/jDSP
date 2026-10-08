@@ -1,8 +1,10 @@
 package dsp;
 
+import dsp.core.MachineInputs;
 import dsp.cpu.IrqLine;
 import dsp.cpu.M68000;
 import dsp.cpu.Z80;
+import dsp.frontend.HostKeyboard;
 import dsp.machine.BagmanPal;
 import dsp.sound.AY8910;
 import dsp.sound.OKIM6295;
@@ -11,7 +13,16 @@ import dsp.video.GfxSet;
 import dsp.video.Palette;
 import dsp.video.ResistorNet;
 
+import java.awt.Dimension;
+import java.awt.GraphicsEnvironment;
+import java.awt.KeyEventDispatcher;
+import java.awt.KeyboardFocusManager;
+import java.awt.event.KeyEvent;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicBoolean;
+import javax.swing.JFrame;
+import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
 
 /** Unit tests ported from dsp-cpp {@code tests/tests.cpp} for the Bagman and Pirates stacks. */
 public final class Tests {
@@ -33,6 +44,10 @@ public final class Tests {
         testPaletteWeights();
         testAy8910();
         testOkim6295();
+        testHostKeyboardMapsArcadeControls();
+        testHostKeyboardNumpadAliases();
+        testHostKeyboardReleaseAndClear();
+        testChildPanelKeyEventsReachDispatcher();
         String bagman = System.getenv("BAGMAN_ZIP");
         if (bagman != null && !bagman.isBlank()) {
             testBagmanBoot(bagman);
@@ -360,6 +375,121 @@ public final class Tests {
         check((chip.read() & 0x01) == 0, "the silence command stops the voice");
         chip.setPin7(false);
         check(chip.sampleFrequency() == 1_056_000 / 165, "pin 7 low selects the /165 divider");
+    }
+
+    private static void testHostKeyboardMapsArcadeControls() {
+        HostKeyboard keyboard = new HostKeyboard();
+        keyboard.press(KeyEvent.VK_5);
+        MachineInputs inputs = keyboard.snapshot();
+        check(inputs.coin1, "5 inserts coin 1");
+        check(!inputs.coin2, "6 is not stuck after pressing 5");
+        check(!inputs.player1.start, "start is not stuck after pressing 5");
+        keyboard.clear();
+
+        keyboard.press(KeyEvent.VK_1);
+        check(keyboard.snapshot().player1.start, "1 starts player 1");
+        keyboard.clear();
+
+        keyboard.press(KeyEvent.VK_UP);
+        check(keyboard.snapshot().player1.up, "up");
+        keyboard.clear();
+        keyboard.press(KeyEvent.VK_DOWN);
+        check(keyboard.snapshot().player1.down, "down");
+        keyboard.clear();
+        keyboard.press(KeyEvent.VK_LEFT);
+        check(keyboard.snapshot().player1.left, "left");
+        keyboard.clear();
+        keyboard.press(KeyEvent.VK_RIGHT);
+        check(keyboard.snapshot().player1.right, "right");
+        keyboard.clear();
+
+        keyboard.press(KeyEvent.VK_CONTROL);
+        check(keyboard.snapshot().player1.button1, "left ctrl is button 1");
+        keyboard.clear();
+        keyboard.press(KeyEvent.VK_SPACE);
+        check(keyboard.snapshot().player1.button1, "space is button 1");
+        keyboard.clear();
+        keyboard.press(KeyEvent.VK_Z);
+        check(keyboard.snapshot().player1.button2, "Z is button 2");
+        keyboard.clear();
+        keyboard.press(KeyEvent.VK_2);
+        check(keyboard.snapshot().player2.start, "2 starts player 2");
+        keyboard.clear();
+        keyboard.press(KeyEvent.VK_6);
+        check(keyboard.snapshot().coin2, "6 inserts coin 2");
+    }
+
+    private static void testHostKeyboardNumpadAliases() {
+        HostKeyboard keyboard = new HostKeyboard();
+        keyboard.press(KeyEvent.VK_NUMPAD5);
+        check(keyboard.snapshot().coin1, "numpad 5 inserts coin 1");
+        keyboard.clear();
+        keyboard.press(KeyEvent.VK_NUMPAD1);
+        check(keyboard.snapshot().player1.start, "numpad 1 starts player 1");
+        keyboard.clear();
+        keyboard.press(KeyEvent.VK_KP_UP);
+        check(keyboard.snapshot().player1.up, "keypad up");
+        keyboard.clear();
+        keyboard.press(KeyEvent.VK_KP_LEFT);
+        check(keyboard.snapshot().player1.left, "keypad left");
+    }
+
+    private static void testHostKeyboardReleaseAndClear() {
+        HostKeyboard keyboard = new HostKeyboard();
+        keyboard.press(KeyEvent.VK_5);
+        keyboard.press(KeyEvent.VK_UP);
+        keyboard.release(KeyEvent.VK_5);
+        MachineInputs inputs = keyboard.snapshot();
+        check(!inputs.coin1, "released 5 no longer inserts a coin");
+        check(inputs.player1.up, "unrelated held keys stay down");
+        keyboard.clear();
+        check(!keyboard.snapshot().player1.up, "clear releases every key");
+    }
+
+    /**
+     * Regression: keys go to the focusable screen panel, not the JFrame.
+     * A listener on the frame alone never sees them.
+     */
+    private static void testChildPanelKeyEventsReachDispatcher() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+        HostKeyboard keyboard = new HostKeyboard();
+        AtomicBoolean failedOnEdt = new AtomicBoolean(false);
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                JFrame frame = new JFrame("jdsp-key-test");
+                JPanel panel = new JPanel();
+                panel.setFocusable(true);
+                panel.setPreferredSize(new Dimension(80, 80));
+                frame.setContentPane(panel);
+                frame.pack();
+                KeyEventDispatcher dispatcher = e -> {
+                    if (e.getID() == KeyEvent.KEY_PRESSED) {
+                        keyboard.press(e.getKeyCode());
+                        return true;
+                    }
+                    return false;
+                };
+                KeyboardFocusManager manager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
+                manager.addKeyEventDispatcher(dispatcher);
+                try {
+                    KeyEvent press = new KeyEvent(panel, KeyEvent.KEY_PRESSED,
+                            System.currentTimeMillis(), 0, KeyEvent.VK_5, '5');
+                    manager.dispatchEvent(press);
+                    if (!keyboard.snapshot().coin1) {
+                        failedOnEdt.set(true);
+                    }
+                } finally {
+                    manager.removeKeyEventDispatcher(dispatcher);
+                    frame.dispose();
+                }
+            });
+        } catch (Exception exception) {
+            check(false, "child-panel key dispatcher test threw: " + exception);
+            return;
+        }
+        check(!failedOnEdt.get(), "key events sourced from the child panel insert coin 1");
     }
 
     private static void testPiratesBoot(String romPath) {
