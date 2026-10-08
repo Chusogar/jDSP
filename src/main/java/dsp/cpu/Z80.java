@@ -112,9 +112,11 @@ public final class Z80 {
     private MemoryWrite out = (port, value) -> {};
     private CycleHandler cycleHandler;
     private InstructionHook instructionHook;
+    private M1Handler m1Handler;
     private IrqAckHandler irqAck;
     private ReturnHandler returnCb;
     private boolean fetchingOpcode = true;
+    private int tInInstr;
     private int[] tMain = T_MAIN;
     private int[] tCb = T_CB;
     private int[] tIndex = T_INDEX;
@@ -156,6 +158,15 @@ public final class Z80 {
 
     public void setInstructionHook(InstructionHook handler) {
         this.instructionHook = handler;
+    }
+
+    public void setM1Handler(M1Handler handler) {
+        this.m1Handler = handler;
+    }
+
+    /** Base T-states elapsed inside the current instruction (Spectrum ULA contention). */
+    public int tInInstruction() {
+        return tInInstr;
     }
 
     public void setIrqAckCallback(IrqAckHandler handler) {
@@ -255,6 +266,7 @@ public final class Z80 {
                 if (cycleHandler != null) {
                     cycleHandler.onCycles(cycles);
                 }
+                tInInstr = 0;
                 continue;
             }
 
@@ -262,6 +274,7 @@ public final class Z80 {
                 instructionHook.beforeOpcode(pc);
             }
             fetchingOpcode = true;
+            tInInstr = 0;
             int opcode = fetch();
             refreshR();
             cycles += tMain[opcode];
@@ -1195,17 +1208,22 @@ public final class Z80 {
     }
 
     private int rd(int addr) {
-        return read.read(u16(addr)) & 0xff;
+        int value = read.read(u16(addr)) & 0xff;
+        tInInstr += 3;
+        return value;
     }
 
     private void wr(int addr, int value) {
         write.write(u16(addr), value & 0xff);
+        tInInstr += 3;
     }
 
     private int fetch() {
+        boolean m1 = fetchingOpcode;
         int value = (fetchingOpcode && opcodeRead != null) ? opcodeRead.read(pc) : read.read(pc);
         fetchingOpcode = false;
         pc = u16(pc + 1);
+        tInInstr += m1 ? 4 : 3;
         return value & 0xff;
     }
 
@@ -1233,6 +1251,9 @@ public final class Z80 {
 
     private void refreshR() {
         r = ((r + 1) & 0x7f) | (r & 0x80);
+        if (m1Handler != null) {
+            m1Handler.onM1();
+        }
     }
 
     private int bc() {

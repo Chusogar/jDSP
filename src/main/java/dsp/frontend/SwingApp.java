@@ -236,6 +236,8 @@ public final class SwingApp {
         } else if (code == KeyEvent.VK_P || code == KeyEvent.VK_F2) {
             paused = !paused;
             updateTitle(frame, machine);
+        } else if (code == KeyEvent.VK_F6) {
+            machine.tapeTogglePlay();
         } else if (code == KeyEvent.VK_F12) {
             turbo.toggle();
             if (turbo.isEnabled() && audioLine != null) {

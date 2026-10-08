@@ -89,6 +89,10 @@ public final class RomLoader {
         return names;
     }
 
+    public byte[] tryRead(String name) {
+        return readFile(name);
+    }
+
     public boolean load(List<RomEntry> entries, byte[] dest, StringBuilder error) {
         for (RomEntry entry : entries) {
             if (entry.name == null) {

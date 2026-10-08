@@ -4,8 +4,9 @@ Java port of [dsp-cpp](https://github.com/Chusogar/dsp-cpp) (itself a C++17 + SD
 port of [dsp-emulator](https://github.com/leniad/dsp-emulator)).
 
 This drop ports the complete **Bagman** (Valadon Automation, 1982) and
-**Pirates** / **Genix Family** (NIX, 1994) drivers and every component they need,
-keeping the dsp-cpp layout:
+**Pirates** / **Genix Family** (NIX, 1994) arcade drivers, plus the full
+**ZX Spectrum** family from dsp-cpp (48K/16K, 128K, +2, +3) and the
+**Pentagon 1024** / **Scorpion ZS-256** clones, keeping the dsp-cpp layout:
 
 | Component | Java | Origin (dsp-cpp) |
 | --- | --- | --- |
@@ -18,8 +19,16 @@ keeping the dsp-cpp layout:
 | Graphics decode, resistor palette | `dsp.video` | `src/video/gfx.cpp` |
 | PAL16R6 protection | `dsp.machine.BagmanPal` | `src/machine/bagman_pal.cpp` |
 | 93C46 EEPROM | `dsp.machine.Eeprom93C46` | `src/machine/eeprom93c46.cpp` |
+| TAP/TZX tape | `dsp.machine.TapeTzx` | `src/machine/tape_tzx.cpp` |
+| SNA/Z80/RZX | `dsp.machine.SpectrumSnap`, `SpectrumRzx` | `src/machine/spectrum_snap.cpp` |
+| Beta 128 / WD1793 | `dsp.machine.Beta128` | `src/machine/beta128.cpp` |
+| +3 uPD765 FDC | `dsp.machine.Nec765Fdc` | `src/machine/nec765.cpp` |
 | Bagman driver | `dsp.drivers.arcade.Bagman` | `src/drivers/arcade/bagman.cpp` |
 | Pirates / Genix driver | `dsp.drivers.arcade.Pirates` | `src/drivers/arcade/pirates.cpp` |
+| Spectrum 48K/16K | `dsp.drivers.computers.Spectrum48k` | `src/drivers/computers/spectrum.cpp` |
+| Spectrum 128K/+2 | `dsp.drivers.computers.Spectrum128k` | `src/drivers/computers/spectrum_128k.cpp` |
+| Spectrum +3 | `dsp.drivers.computers.Spectrum3` | `src/drivers/computers/spectrum_3.cpp` |
+| Pentagon / Scorpion | `dsp.drivers.computers.ZxClone` | `src/drivers/computers/zx_clone.cpp` |
 | Front end | `dsp.frontend.SwingApp` | `src/frontend/sdl_app.cpp` |
 
 To add another machine follow [docs/adding-a-driver.md](docs/adding-a-driver.md).
@@ -28,11 +37,11 @@ To add another machine follow [docs/adding-a-driver.md](docs/adding-a-driver.md)
 
 Prebuilt runnable JAR (JDK 17+):
 
-https://github.com/Chusogar/jDSP/raw/cursor/f12-turbo-a9b4/jdsp.jar
+https://github.com/Chusogar/jDSP/raw/cursor/zx-spectrum-clones-a9b4/jdsp.jar
 
 ```bash
-curl -L -o jdsp.jar https://github.com/Chusogar/jDSP/raw/cursor/f12-turbo-a9b4/jdsp.jar
-java -jar jdsp.jar --game pirates /path/to/pirates.zip
+curl -L -o jdsp.jar https://github.com/Chusogar/jDSP/raw/cursor/zx-spectrum-clones-a9b4/jdsp.jar
+java -jar jdsp.jar --game spectrum48 /path/to/spectrum/roms
 ```
 
 ## Building
@@ -68,6 +77,8 @@ java -jar target/jdsp.jar --game bagman /path/to/bagman.zip
 java -jar target/jdsp.jar --game pirates /path/to/pirates.zip
 java -jar target/jdsp.jar --game genix /path/to/genix.zip
 java -jar target/jdsp.jar --game pirates --screenshot pirates.bmp --frames 300 --mute pirates.zip
+java -jar target/jdsp.jar --game spectrum48 /path/to/spectrum/roms --tape game.tzx
+java -jar target/jdsp.jar --game pentagon /path/to/clone/roms --disk game.trd
 ```
 
 ### Bagman
@@ -101,15 +112,38 @@ writes the EEPROM).
 Options:
 
 ```
---game NAME        machine to run (required; bagman, pirates, genix)
+--game NAME        machine to run (required)
 --scale N          window scale factor (default 3)
 --dip [BANK:]VALUE DIP switch byte, decimal or 0x hex (bagman: one bank)
+--tape FILE        TAP/TZX tape (Spectrum family)
+--disk FILE        DSK (+3) or TRD/SCL (Pentagon/Scorpion)
+--cart FILE        Interface 2 ROM cartridge (128K/+2/+3)
 --mute             disable audio
 --fullscreen       start maximized
 --screenshot FILE  headless mode: render frames and write FILE (BMP)
 --frames N         frames to run in headless mode (default 300)
 ```
 
-Controls (click the window first): arrows move, Left Ctrl/Space button 1,
+Arcade controls (click the window first): arrows move, Left Ctrl/Space button 1,
 Left Alt/Z button 2, 1/2 start, 5/6 insert coin (numpad works too),
 P pause, F3 reset, F12 turbo (unlimited speed), Esc quit.
+
+Spectrum machines use the host keyboard (plus Kempston on the cursor keys /
+joystick). F6 plays or pauses a loaded tape. Pentagon/Scorpion Magic is F5.
+
+### ZX Spectrum
+
+Put the machine ROM in a directory (or pass the `.rom` file itself):
+
+| `--game` | ROM |
+| --- | --- |
+| `spectrum48` / `spectrum16` | `spectrum.rom` / `48.rom` (16 KB) |
+| `spectrum128` | `128.rom` or `128-0.rom` + `128-1.rom` (32 KB) |
+| `plus2` | `plus2.rom` (32 KB) |
+| `plus3` | `plus3.rom` or `plus3-0.rom` … `plus3-3.rom` (64 KB) |
+| `pentagon` | 128K ROM + `trdos.rom` (optional `gluk*.rom`) |
+| `scorpion` | `scorpion.rom` (64 KB) or `scorp0.rom`…`scorp3.rom` |
+
+Tapes (`.tap` / `.tzx`), snapshots (`.sna` / `.z80`), RZX recordings, +3 disks
+(`.dsk`) and Beta 128 disks (`.trd` / `.scl`) load with `--tape` / `--disk`
+or as extra media after the ROM path.
