@@ -28,10 +28,10 @@ To add another machine follow [docs/adding-a-driver.md](docs/adding-a-driver.md)
 
 Prebuilt runnable JAR (JDK 17+):
 
-https://github.com/Chusogar/jDSP/raw/cursor/pirates-bagman-java-a9b4/jdsp.jar
+https://github.com/Chusogar/jDSP/raw/cursor/fix-keyboard-a9b4/jdsp.jar
 
 ```bash
-curl -L -o jdsp.jar https://github.com/Chusogar/jDSP/raw/cursor/pirates-bagman-java-a9b4/jdsp.jar
+curl -L -o jdsp.jar https://github.com/Chusogar/jDSP/raw/cursor/fix-keyboard-a9b4/jdsp.jar
 java -jar jdsp.jar --game pirates /path/to/pirates.zip
 ```
 
@@ -110,5 +110,6 @@ Options:
 --frames N         frames to run in headless mode (default 300)
 ```
 
-Controls: arrows move, Left Ctrl/Space button 1, Left Alt/Z button 2,
-1/2 start, 5/6 insert coin, P pause, F3 reset, Esc quit.
+Controls (click the window first): arrows move, Left Ctrl/Space button 1,
+Left Alt/Z button 2, 1/2 start, 5/6 insert coin (numpad works too),
+P pause, F3 reset, Esc quit.

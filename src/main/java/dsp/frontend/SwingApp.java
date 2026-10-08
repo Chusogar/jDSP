@@ -1,6 +1,5 @@
 package dsp.frontend;
 
-import dsp.core.Key;
 import dsp.core.Machine;
 import dsp.core.MachineInputs;
 
@@ -10,15 +9,21 @@ import javax.sound.sampled.DataLine;
 import javax.sound.sampled.SourceDataLine;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.WindowConstants;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.KeyEventDispatcher;
+import java.awt.KeyboardFocusManager;
 import java.awt.RenderingHints;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
 import java.nio.ByteBuffer;
@@ -26,8 +31,6 @@ import java.nio.ByteOrder;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Swing + Java Sound front end: window, nearest-neighbour blit, audio queue and keyboard.
@@ -37,7 +40,7 @@ public final class SwingApp {
     private final AppOptions options;
     private volatile boolean running = true;
     private volatile boolean paused;
-    private final Set<Integer> keysDown = ConcurrentHashMap.newKeySet();
+    private final HostKeyboard keyboard = new HostKeyboard();
 
     public SwingApp(AppOptions options) {
         this.options = options;
@@ -94,27 +97,67 @@ public final class SwingApp {
             frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
             frame.setUndecorated(true);
         }
-        frame.addKeyListener(new KeyAdapter() {
+        // The screen panel is the focus owner; a listener on the JFrame never
+        // sees keys. Capture them globally for this window, and also on the
+        // panel itself so clicks/arrows cannot steal input.
+        frame.setFocusable(true);
+        frame.setFocusTraversalKeysEnabled(false);
+        panel.setFocusTraversalKeysEnabled(false);
+        KeyAdapter keys = new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
-                keysDown.add(e.getKeyCode());
-                if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
-                    running = false;
-                    frame.dispose();
-                } else if (e.getKeyCode() == KeyEvent.VK_F3) {
-                    machine.reset();
-                } else if (e.getKeyCode() == KeyEvent.VK_P || e.getKeyCode() == KeyEvent.VK_F2) {
-                    paused = !paused;
-                    updateTitle(frame, machine);
-                }
+                onKeyPressed(e, machine, frame);
             }
 
             @Override
             public void keyReleased(KeyEvent e) {
-                keysDown.remove(e.getKeyCode());
+                keyboard.release(e.getKeyCode());
+            }
+        };
+        frame.addKeyListener(keys);
+        panel.addKeyListener(keys);
+        KeyEventDispatcher dispatcher = e -> {
+            if (!running || !(frame.isActive() || belongsTo(frame, e.getComponent()))) {
+                return false;
+            }
+            int id = e.getID();
+            if (id == KeyEvent.KEY_PRESSED) {
+                onKeyPressed(e, machine, frame);
+                return true;
+            }
+            if (id == KeyEvent.KEY_RELEASED) {
+                keyboard.release(e.getKeyCode());
+                return true;
+            }
+            return id == KeyEvent.KEY_TYPED;
+        };
+        KeyboardFocusManager focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
+        focusManager.addKeyEventDispatcher(dispatcher);
+        frame.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                running = false;
+                focusManager.removeKeyEventDispatcher(dispatcher);
+            }
+
+            @Override
+            public void windowClosed(WindowEvent e) {
+                running = false;
+                focusManager.removeKeyEventDispatcher(dispatcher);
+            }
+
+            @Override
+            public void windowActivated(WindowEvent e) {
+                panel.requestFocusInWindow();
+            }
+
+            @Override
+            public void windowDeactivated(WindowEvent e) {
+                keyboard.clear();
             }
         });
         frame.setVisible(true);
+        SwingUtilities.invokeLater(panel::requestFocusInWindow);
 
         SourceDataLine line = null;
         if (!options.mute) {
@@ -168,10 +211,36 @@ public final class SwingApp {
             Thread.sleep(50);
         }
         timer.stop();
+        focusManager.removeKeyEventDispatcher(dispatcher);
         if (audioLine != null) {
             audioLine.close();
         }
         return 0;
+    }
+
+    private void onKeyPressed(KeyEvent e, Machine machine, JFrame frame) {
+        int code = e.getKeyCode();
+        boolean repeat = keyboard.isDown(code);
+        keyboard.press(code);
+        if (repeat) {
+            return;
+        }
+        if (code == KeyEvent.VK_ESCAPE) {
+            running = false;
+            frame.dispose();
+        } else if (code == KeyEvent.VK_F3) {
+            machine.reset();
+        } else if (code == KeyEvent.VK_P || code == KeyEvent.VK_F2) {
+            paused = !paused;
+            updateTitle(frame, machine);
+        }
+    }
+
+    private static boolean belongsTo(JFrame frame, Component component) {
+        if (component == null) {
+            return frame.isFocused() || frame.isActive();
+        }
+        return component == frame || SwingUtilities.getRoot(component) == frame;
     }
 
     private static int envInt(String name, int fallback) {
@@ -191,129 +260,7 @@ public final class SwingApp {
     }
 
     private MachineInputs collectInputs() {
-        MachineInputs inputs = new MachineInputs();
-        inputs.player1.up = down(KeyEvent.VK_UP);
-        inputs.player1.down = down(KeyEvent.VK_DOWN);
-        inputs.player1.left = down(KeyEvent.VK_LEFT);
-        inputs.player1.right = down(KeyEvent.VK_RIGHT);
-        inputs.player1.button1 = down(KeyEvent.VK_CONTROL) || down(KeyEvent.VK_SPACE);
-        inputs.player1.button2 = down(KeyEvent.VK_ALT) || down(KeyEvent.VK_Z);
-        inputs.player1.button3 = down(KeyEvent.VK_X);
-        inputs.player1.button4 = down(KeyEvent.VK_C);
-        inputs.player1.start = down(KeyEvent.VK_1);
-        inputs.player1.select = down(KeyEvent.VK_3);
-
-        inputs.player2.up = down(KeyEvent.VK_R);
-        inputs.player2.down = down(KeyEvent.VK_F);
-        inputs.player2.left = down(KeyEvent.VK_D);
-        inputs.player2.right = down(KeyEvent.VK_G);
-        inputs.player2.button1 = down(KeyEvent.VK_A);
-        inputs.player2.button2 = down(KeyEvent.VK_S);
-        inputs.player2.button3 = down(KeyEvent.VK_Q);
-        inputs.player2.button4 = down(KeyEvent.VK_W);
-        inputs.player2.start = down(KeyEvent.VK_2);
-        inputs.player2.select = down(KeyEvent.VK_4);
-
-        inputs.coin1 = down(KeyEvent.VK_5);
-        inputs.coin2 = down(KeyEvent.VK_6);
-        inputs.service = down(KeyEvent.VK_F1);
-
-        for (Key key : Key.values()) {
-            Integer code = keyCode(key);
-            if (code != null) {
-                inputs.keys[key.ordinal()] = down(code);
-            }
-        }
-        return inputs;
-    }
-
-    private boolean down(int keyCode) {
-        return keysDown.contains(keyCode);
-    }
-
-    private static Integer keyCode(Key key) {
-        return switch (key) {
-            case A -> KeyEvent.VK_A;
-            case B -> KeyEvent.VK_B;
-            case C -> KeyEvent.VK_C;
-            case D -> KeyEvent.VK_D;
-            case E -> KeyEvent.VK_E;
-            case F -> KeyEvent.VK_F;
-            case G -> KeyEvent.VK_G;
-            case H -> KeyEvent.VK_H;
-            case I -> KeyEvent.VK_I;
-            case J -> KeyEvent.VK_J;
-            case K -> KeyEvent.VK_K;
-            case L -> KeyEvent.VK_L;
-            case M -> KeyEvent.VK_M;
-            case N -> KeyEvent.VK_N;
-            case O -> KeyEvent.VK_O;
-            case P -> KeyEvent.VK_P;
-            case Q -> KeyEvent.VK_Q;
-            case R -> KeyEvent.VK_R;
-            case S -> KeyEvent.VK_S;
-            case T -> KeyEvent.VK_T;
-            case U -> KeyEvent.VK_U;
-            case V -> KeyEvent.VK_V;
-            case W -> KeyEvent.VK_W;
-            case X -> KeyEvent.VK_X;
-            case Y -> KeyEvent.VK_Y;
-            case Z -> KeyEvent.VK_Z;
-            case NUM0 -> KeyEvent.VK_0;
-            case NUM1 -> KeyEvent.VK_1;
-            case NUM2 -> KeyEvent.VK_2;
-            case NUM3 -> KeyEvent.VK_3;
-            case NUM4 -> KeyEvent.VK_4;
-            case NUM5 -> KeyEvent.VK_5;
-            case NUM6 -> KeyEvent.VK_6;
-            case NUM7 -> KeyEvent.VK_7;
-            case NUM8 -> KeyEvent.VK_8;
-            case NUM9 -> KeyEvent.VK_9;
-            case ENTER -> KeyEvent.VK_ENTER;
-            case SPACE -> KeyEvent.VK_SPACE;
-            case LEFT_SHIFT -> KeyEvent.VK_SHIFT;
-            case RIGHT_SHIFT -> KeyEvent.VK_SHIFT;
-            case LEFT_CTRL -> KeyEvent.VK_CONTROL;
-            case RIGHT_CTRL -> KeyEvent.VK_CONTROL;
-            case BACKSPACE -> KeyEvent.VK_BACK_SPACE;
-            case UP -> KeyEvent.VK_UP;
-            case DOWN -> KeyEvent.VK_DOWN;
-            case LEFT -> KeyEvent.VK_LEFT;
-            case RIGHT -> KeyEvent.VK_RIGHT;
-            case COMMA -> KeyEvent.VK_COMMA;
-            case PERIOD -> KeyEvent.VK_PERIOD;
-            case SEMICOLON -> KeyEvent.VK_SEMICOLON;
-            case QUOTE -> KeyEvent.VK_QUOTE;
-            case SLASH -> KeyEvent.VK_SLASH;
-            case MINUS -> KeyEvent.VK_MINUS;
-            case ESCAPE -> KeyEvent.VK_ESCAPE;
-            case TAB -> KeyEvent.VK_TAB;
-            case CAPS_LOCK -> KeyEvent.VK_CAPS_LOCK;
-            case HOME -> KeyEvent.VK_HOME;
-            case CBM -> KeyEvent.VK_ALT;
-            case EQUALS -> KeyEvent.VK_EQUALS;
-            case PLUS -> KeyEvent.VK_ADD;
-            case ASTERISK -> KeyEvent.VK_CLOSE_BRACKET;
-            case AT -> KeyEvent.VK_OPEN_BRACKET;
-            case F1 -> KeyEvent.VK_F1;
-            case F2 -> KeyEvent.VK_F2;
-            case F3 -> KeyEvent.VK_F3;
-            case F4 -> KeyEvent.VK_F4;
-            case F5 -> KeyEvent.VK_F5;
-            case F6 -> KeyEvent.VK_F6;
-            case F7 -> KeyEvent.VK_F7;
-            case F8 -> KeyEvent.VK_F8;
-            case F9 -> KeyEvent.VK_F9;
-            case F10 -> KeyEvent.VK_F10;
-            case F11 -> KeyEvent.VK_F11;
-            case F12 -> KeyEvent.VK_F12;
-            case BACKSLASH -> KeyEvent.VK_BACK_SLASH;
-            case BACKQUOTE -> KeyEvent.VK_BACK_QUOTE;
-            case DELETE -> KeyEvent.VK_DELETE;
-            case LEFT_GUI -> KeyEvent.VK_WINDOWS;
-            case RIGHT_GUI -> KeyEvent.VK_WINDOWS;
-            case RIGHT_ALT -> KeyEvent.VK_ALT;
-        };
+        return keyboard.snapshot();
     }
 
     private static final class ScreenPanel extends JPanel {
@@ -324,6 +271,8 @@ public final class SwingApp {
             setPreferredSize(new Dimension(width, height));
             setBackground(Color.BLACK);
             setFocusable(true);
+            setRequestFocusEnabled(true);
+            setFocusTraversalKeysEnabled(false);
         }
 
         @Override
