@@ -5,6 +5,7 @@ import dsp.cpu.IrqLine;
 import dsp.cpu.M68000;
 import dsp.cpu.Z80;
 import dsp.frontend.HostKeyboard;
+import dsp.frontend.TurboMode;
 import dsp.machine.BagmanPal;
 import dsp.sound.AY8910;
 import dsp.sound.OKIM6295;
@@ -48,6 +49,8 @@ public final class Tests {
         testHostKeyboardNumpadAliases();
         testHostKeyboardReleaseAndClear();
         testChildPanelKeyEventsReachDispatcher();
+        testTurboModeToggleAndPacing();
+        testTurboModePresentsEveryFourthFrame();
         String bagman = System.getenv("BAGMAN_ZIP");
         if (bagman != null && !bagman.isBlank()) {
             testBagmanBoot(bagman);
@@ -444,6 +447,37 @@ public final class Tests {
         check(inputs.player1.up, "unrelated held keys stay down");
         keyboard.clear();
         check(!keyboard.snapshot().player1.up, "clear releases every key");
+    }
+
+    private static void testTurboModeToggleAndPacing() {
+        TurboMode turbo = new TurboMode();
+        check(!turbo.isEnabled(), "turbo starts off");
+        check(turbo.shouldQueueAudio(), "paced mode queues audio");
+        check(turbo.timerDelayMs(16) == 16, "paced timer uses the machine frame delay");
+        check(turbo.toggle(), "F12 turns turbo on");
+        check(turbo.isEnabled(), "turbo stays on until toggled again");
+        check(!turbo.shouldQueueAudio(), "turbo skips audio pacing");
+        check(turbo.timerDelayMs(16) == 1, "turbo drops the frame limiter");
+        check(!turbo.toggle(), "F12 turns turbo off");
+        check(!turbo.isEnabled(), "turbo is off after the second F12");
+        check(turbo.shouldQueueAudio(), "leaving turbo restores audio");
+        check(turbo.timerDelayMs(16) == 16, "leaving turbo restores the frame delay");
+    }
+
+    private static void testTurboModePresentsEveryFourthFrame() {
+        TurboMode turbo = new TurboMode();
+        check(turbo.shouldPresent(), "paced mode presents every frame");
+        check(turbo.shouldPresent(), "paced mode still presents the next frame");
+        turbo.toggle();
+        int presented = 0;
+        for (int frame = 0; frame < 8; frame++) {
+            if (turbo.shouldPresent()) {
+                presented++;
+            }
+        }
+        check(presented == 2, "turbo presents every 4th frame (got " + presented + ")");
+        turbo.toggle();
+        check(turbo.shouldPresent(), "leaving turbo presents every frame again");
     }
 
     /**

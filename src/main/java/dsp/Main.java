@@ -159,6 +159,6 @@ public final class Main {
         System.out.println("  --help             show this help");
         System.out.println();
         System.out.println("Controls: arrows move, Left Ctrl/Space button 1, Left Alt/Z button 2,");
-        System.out.println("          1/2 start, 5/6 insert coin, P pause, F3 reset, Esc quit.");
+        System.out.println("          1/2 start, 5/6 insert coin, P pause, F3 reset, F12 turbo, Esc quit.");
     }
 }

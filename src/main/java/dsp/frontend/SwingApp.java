@@ -41,6 +41,10 @@ public final class SwingApp {
     private volatile boolean running = true;
     private volatile boolean paused;
     private final HostKeyboard keyboard = new HostKeyboard();
+    private final TurboMode turbo = new TurboMode();
+    private Timer frameTimer;
+    private int pacedDelayMs = 16;
+    private SourceDataLine audioLine;
 
     public SwingApp(AppOptions options) {
         this.options = options;
@@ -159,20 +163,18 @@ public final class SwingApp {
         frame.setVisible(true);
         SwingUtilities.invokeLater(panel::requestFocusInWindow);
 
-        SourceDataLine line = null;
         if (!options.mute) {
             AudioFormat format = new AudioFormat(machine.sampleRate(), 16, 1, true, false);
             DataLine.Info info = new DataLine.Info(SourceDataLine.class, format);
             if (AudioSystem.isLineSupported(info)) {
-                line = (SourceDataLine) AudioSystem.getLine(info);
-                line.open(format, machine.sampleRate());
-                line.start();
+                audioLine = (SourceDataLine) AudioSystem.getLine(info);
+                audioLine.open(format, machine.sampleRate());
+                audioLine.start();
             }
         }
-        SourceDataLine audioLine = line;
 
-        int delayMs = Math.max(1, (int) Math.round(1000.0 / machine.framesPerSecond()));
-        Timer timer = new Timer(delayMs, e -> {
+        pacedDelayMs = Math.max(1, (int) Math.round(1000.0 / machine.framesPerSecond()));
+        frameTimer = new Timer(pacedDelayMs, e -> {
             if (!running) {
                 ((Timer) e.getSource()).stop();
                 if (audioLine != null) {
@@ -187,30 +189,31 @@ public final class SwingApp {
             machine.setInputs(inputs);
             machine.runFrame();
 
-            int[] src = machine.framebuffer();
-            int[] dst = ((DataBufferInt) image.getRaster().getDataBuffer()).getData();
-            System.arraycopy(src, 0, dst, 0, Math.min(src.length, dst.length));
-            panel.repaint();
-
-            if (audioLine != null) {
-                List<Short> samples = new ArrayList<>();
-                machine.drainAudio(samples);
-                if (!samples.isEmpty()) {
-                    ByteBuffer buffer = ByteBuffer.allocate(samples.size() * 2).order(ByteOrder.LITTLE_ENDIAN);
-                    for (short sample : samples) {
-                        buffer.putShort(sample);
-                    }
-                    byte[] bytes = buffer.array();
-                    audioLine.write(bytes, 0, bytes.length);
+            List<Short> samples = new ArrayList<>();
+            machine.drainAudio(samples);
+            if (turbo.shouldQueueAudio() && audioLine != null && !samples.isEmpty()) {
+                ByteBuffer buffer = ByteBuffer.allocate(samples.size() * 2).order(ByteOrder.LITTLE_ENDIAN);
+                for (short sample : samples) {
+                    buffer.putShort(sample);
                 }
+                byte[] bytes = buffer.array();
+                audioLine.write(bytes, 0, bytes.length);
+            }
+
+            // Turbo: present every 4th frame so CPU goes to emulation, not blit.
+            if (turbo.shouldPresent()) {
+                int[] src = machine.framebuffer();
+                int[] dst = ((DataBufferInt) image.getRaster().getDataBuffer()).getData();
+                System.arraycopy(src, 0, dst, 0, Math.min(src.length, dst.length));
+                panel.repaint();
             }
         });
-        timer.start();
+        frameTimer.start();
 
         while (running && frame.isDisplayable()) {
             Thread.sleep(50);
         }
-        timer.stop();
+        frameTimer.stop();
         focusManager.removeKeyEventDispatcher(dispatcher);
         if (audioLine != null) {
             audioLine.close();
@@ -232,6 +235,15 @@ public final class SwingApp {
             machine.reset();
         } else if (code == KeyEvent.VK_P || code == KeyEvent.VK_F2) {
             paused = !paused;
+            updateTitle(frame, machine);
+        } else if (code == KeyEvent.VK_F12) {
+            turbo.toggle();
+            if (turbo.isEnabled() && audioLine != null) {
+                audioLine.flush();
+            }
+            if (frameTimer != null) {
+                frameTimer.setDelay(turbo.timerDelayMs(pacedDelayMs));
+            }
             updateTitle(frame, machine);
         }
     }
@@ -255,6 +267,9 @@ public final class SwingApp {
         String title = "jDSP - " + machine.title();
         if (paused) {
             title += " [PAUSED]";
+        }
+        if (turbo.isEnabled()) {
+            title += " [TURBO]";
         }
         frame.setTitle(title);
     }
