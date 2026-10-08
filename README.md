@@ -28,10 +28,10 @@ To add another machine follow [docs/adding-a-driver.md](docs/adding-a-driver.md)
 
 Prebuilt runnable JAR (JDK 17+):
 
-https://github.com/Chusogar/jDSP/raw/cursor/fix-keyboard-a9b4/jdsp.jar
+https://github.com/Chusogar/jDSP/raw/cursor/f12-turbo-a9b4/jdsp.jar
 
 ```bash
-curl -L -o jdsp.jar https://github.com/Chusogar/jDSP/raw/cursor/fix-keyboard-a9b4/jdsp.jar
+curl -L -o jdsp.jar https://github.com/Chusogar/jDSP/raw/cursor/f12-turbo-a9b4/jdsp.jar
 java -jar jdsp.jar --game pirates /path/to/pirates.zip
 ```
 
@@ -112,4 +112,4 @@ Options:
 
 Controls (click the window first): arrows move, Left Ctrl/Space button 1,
 Left Alt/Z button 2, 1/2 start, 5/6 insert coin (numpad works too),
-P pause, F3 reset, Esc quit.
+P pause, F3 reset, F12 turbo (unlimited speed), Esc quit.
