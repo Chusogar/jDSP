@@ -3,11 +3,16 @@ package dsp;
 import dsp.core.Machine;
 import dsp.drivers.arcade.Bagman;
 import dsp.drivers.arcade.Pirates;
+import dsp.drivers.computers.Spectrum128k;
+import dsp.drivers.computers.Spectrum3;
+import dsp.drivers.computers.Spectrum48k;
+import dsp.drivers.computers.ZxClone;
 import dsp.frontend.AppOptions;
 import dsp.frontend.SwingApp;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /** Command-line entry point, matching dsp-cpp {@code src/main.cpp} for Bagman. */
 public final class Main {
@@ -27,6 +32,7 @@ public final class Main {
         AppOptions options = new AppOptions();
         String game = "";
         List<DipSetting> dips = new ArrayList<>();
+        List<String> media = new ArrayList<>();
 
         for (int index = 0; index < args.length; index++) {
             String argument = args[index];
@@ -49,6 +55,8 @@ public final class Main {
                     dips.add(new DipSetting(Integer.parseInt(value.substring(0, separator)),
                             parseInt(value.substring(separator + 1))));
                 }
+            } else if (argument.equals("--tape") || argument.equals("--disk") || argument.equals("--cart")) {
+                media.add(next(args, ++index, argument));
             } else if (argument.equals("--mute")) {
                 options.mute = true;
             } else if (argument.equals("--fullscreen")) {
@@ -97,6 +105,12 @@ public final class Main {
             System.err.println("cannot start " + game + ": " + error);
             System.exit(1);
         }
+        for (String path : media) {
+            if (!machine.loadMedia(path, error)) {
+                System.err.println("cannot load media " + path + ": " + error);
+                System.exit(1);
+            }
+        }
         for (DipSetting setting : dips) {
             machine.setDipSwitch(setting.bank, setting.value);
         }
@@ -109,6 +123,7 @@ public final class Main {
     }
 
     static Machine createMachine(String game) {
+        game = game.toLowerCase(Locale.ROOT);
         if (game.equals("bagman")) {
             return new Bagman();
         }
@@ -117,6 +132,28 @@ public final class Main {
         }
         if (game.equals("genix")) {
             return new Pirates(Pirates.Game.GENIX);
+        }
+        if (game.equals("spectrum48") || game.equals("spectrum")) {
+            return new Spectrum48k();
+        }
+        if (game.equals("spectrum16")) {
+            return new Spectrum48k(Spectrum48k.Model.SPEC_16K);
+        }
+        if (game.equals("spectrum128")) {
+            return new Spectrum128k(Spectrum128k.Model.SPEC_128K);
+        }
+        if (game.equals("plus2")) {
+            return new Spectrum128k(Spectrum128k.Model.SPEC_PLUS2);
+        }
+        if (game.equals("plus3")) {
+            return new Spectrum3();
+        }
+        if (game.equals("pentagon") || game.equals("pentagon1024") || game.equals("pent1024")) {
+            return new ZxClone.Pentagon1024();
+        }
+        if (game.equals("scorpion") || game.equals("scorpion256") || game.equals("scorpio")
+                || game.equals("zs256")) {
+            return new ZxClone.Scorpion256();
         }
         return null;
     }
@@ -141,6 +178,11 @@ public final class Main {
         System.out.println("    pirates");
         System.out.println("    genix");
         System.out.println();
+        System.out.println("  ZX Spectrum:");
+        System.out.println("    spectrum48, spectrum16, spectrum128, plus2, plus3");
+        System.out.println("  Clones:");
+        System.out.println("    pentagon / pentagon1024, scorpion / scorpion256");
+        System.out.println();
     }
 
     private static void printUsage() {
@@ -152,6 +194,9 @@ public final class Main {
         System.out.println("  --scale N          window scale factor (default 3)");
         System.out.println("  --dip [BANK:]VALUE DIP switch byte, decimal or 0x hex; bagman has one bank,");
         System.out.println("                     pirates/genix store settings in EEPROM instead");
+        System.out.println("  --tape FILE        load a TAP/TZX tape after the machine starts");
+        System.out.println("  --disk FILE        load a DSK (+3) or TRD/SCL (Pentagon/Scorpion) disk");
+        System.out.println("  --cart FILE        load an Interface 2 ROM cartridge");
         System.out.println("  --mute             disable audio");
         System.out.println("  --fullscreen       start maximized");
         System.out.println("  --screenshot FILE  headless mode: render frames and write FILE (BMP)");
@@ -159,6 +204,7 @@ public final class Main {
         System.out.println("  --help             show this help");
         System.out.println();
         System.out.println("Controls: arrows move, Left Ctrl/Space button 1, Left Alt/Z button 2,");
-        System.out.println("          1/2 start, 5/6 insert coin, P pause, F3 reset, F12 turbo, Esc quit.");
+        System.out.println("          1/2 start, 5/6 insert coin, P pause, F3 reset, F6 tape play/pause,");
+        System.out.println("          F12 turbo, Esc quit. Spectrum machines use the host keyboard.");
     }
 }

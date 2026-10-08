@@ -11,8 +11,9 @@ src/main/java/dsp/
   cpu/           Z80, M68000, IrqLine
   sound/         AY8910, OKIM6295
   video/         GfxSet, Palette
-  machine/       protection / support chips (BagmanPal, Eeprom93C46, …)
+  machine/       protection / support chips (BagmanPal, Eeprom93C46, tape, FDC, …)
   drivers/arcade/
+  drivers/computers/
   frontend/      SwingApp
 ```
 

@@ -51,6 +51,17 @@ public final class Tests {
         testChildPanelKeyEventsReachDispatcher();
         testTurboModeToggleAndPacing();
         testTurboModePresentsEveryFourthFrame();
+        testZ80M1AndUlaTiming();
+        testSpectrumKeyboardMatrix();
+        testTapeTapPlayback();
+        testSpectrumSna48k();
+        testSpectrumDriverRegistration();
+        testSpectrum48UlaBorder();
+        String spectrumRom = firstEnv("SPECTRUM48_ROM", "JDSP_SPECTRUM48_ROM");
+        if (spectrumRom != null && !spectrumRom.isBlank()
+                && java.nio.file.Files.exists(java.nio.file.Path.of(spectrumRom))) {
+            testSpectrum48Boot(spectrumRom);
+        }
         String bagman = System.getenv("BAGMAN_ZIP");
         if (bagman != null && !bagman.isBlank()) {
             testBagmanBoot(bagman);
@@ -583,6 +594,157 @@ public final class Tests {
         check("Bagman".equals(machine.title()), "Bagman reports its title");
         check(machine.screenWidth() == 224 && machine.screenHeight() == 256,
                 "Bagman framebuffer is 224x256");
+    }
+
+    private static void testZ80M1AndUlaTiming() {
+        int[] memory = makeMemory();
+        Z80 cpu = makeCpu(memory);
+        java.util.concurrent.atomic.AtomicInteger m1 = new java.util.concurrent.atomic.AtomicInteger();
+        cpu.setM1Handler(m1::incrementAndGet);
+        put(memory, 0, 0x00, 0x76);
+        cpu.run(4);
+        check(cpu.tInInstruction() == 4, "NOP M1 fetch accounts for 4 T-states");
+        check(m1.get() >= 1, "NOP produces an M1 fetch");
+    }
+
+    private static void testSpectrumKeyboardMatrix() {
+        dsp.machine.SpectrumKeyboard keyboard = new dsp.machine.SpectrumKeyboard();
+        dsp.core.MachineInputs inputs = new dsp.core.MachineInputs();
+        inputs.keys[dsp.core.Key.Q.ordinal()] = true;
+        inputs.keys[dsp.core.Key.ENTER.ordinal()] = true;
+        keyboard.apply(inputs);
+        check((keyboard.keys[2] & 0x01) == 0, "Q sits on row 2 bit 0");
+        check((keyboard.keys[6] & 0x01) == 0, "Enter sits on row 6 bit 0");
+        check(keyboard.ulaKeys(0xfbfe) == (0x1e), "port $FBFE reads the Q row");
+        inputs.player1.right = true;
+        keyboard.apply(inputs);
+        check((keyboard.joy & 0x01) != 0, "Kempston right is bit 0");
+    }
+
+    private static void testTapeTapPlayback() {
+        byte[] tap = new byte[21];
+        tap[0] = 19;
+        tap[1] = 0;
+        tap[2] = 0x00;
+        for (int i = 3; i < 21; i++) {
+            tap[i] = (byte) i;
+        }
+        dsp.machine.TapeTzx tape = new dsp.machine.TapeTzx();
+        StringBuilder error = new StringBuilder();
+        check(tape.loadMemory(tap, error), "TAP header block loads: " + error);
+        check(tape.blockCount() == 1, "TAP produces one standard block");
+        tape.play(true);
+        int high = 0;
+        int low = 0;
+        for (int i = 0; i < 20000; i++) {
+            if (tape.advance(8) != 0) {
+                high++;
+            } else {
+                low++;
+            }
+        }
+        check(tape.isPlaying(), "standard TAP block is still playing after the pilot");
+        check(high > 0 && low > 0, "tape EAR line toggles during the pilot");
+    }
+
+    private static void testSpectrumSna48k() {
+        byte[] sna = new byte[27 + 0xc000];
+        sna[22] = 0x12;
+        sna[21] = 0x34;
+        sna[23] = 0x00;
+        sna[24] = 0x40;
+        sna[26] = 0x02;
+        sna[27 + 0] = (byte) 0x56;
+        sna[27 + 1] = (byte) 0x78;
+        dsp.machine.SpectrumSnap snap = new dsp.machine.SpectrumSnap();
+        StringBuilder error = new StringBuilder();
+        check(dsp.machine.SpectrumSnap.fromSna(sna, snap, error), "48K SNA decodes: " + error);
+        check(snap.a == 0x12 && snap.f == 0x34, "SNA restores AF");
+        check(snap.pc == 0x7856, "48K SNA pops PC from the stack at SP");
+        check(snap.sp == 0x4002, "48K SNA advances SP past the stacked PC");
+        check((snap.border & 7) == 2, "SNA stores the border colour");
+        check(!snap.is128, "49179-byte SNA is a 48K snapshot");
+    }
+
+    private static void testSpectrumDriverRegistration() {
+        check(Main.createMachine("spectrum48") instanceof dsp.drivers.computers.Spectrum48k,
+                "spectrum48 creates the 48K driver");
+        check(Main.createMachine("spectrum16") instanceof dsp.drivers.computers.Spectrum48k,
+                "spectrum16 creates the 16K driver");
+        check(Main.createMachine("spectrum128") instanceof dsp.drivers.computers.Spectrum128k,
+                "spectrum128 creates the 128K driver");
+        check(Main.createMachine("plus2") instanceof dsp.drivers.computers.Spectrum128k,
+                "plus2 creates the +2 driver");
+        check(Main.createMachine("plus3") instanceof dsp.drivers.computers.Spectrum3,
+                "plus3 creates the +3 driver");
+        check(Main.createMachine("pentagon") instanceof dsp.drivers.computers.ZxClone.Pentagon1024,
+                "pentagon creates Pentagon 1024");
+        check(Main.createMachine("scorpion256") instanceof dsp.drivers.computers.ZxClone.Scorpion256,
+                "scorpion256 creates Scorpion ZS-256");
+        check("ZX Spectrum 48K".equals(new dsp.drivers.computers.Spectrum48k().title()),
+                "48K reports its title before init");
+        check("Pentagon 1024".equals(new dsp.drivers.computers.ZxClone.Pentagon1024().title()),
+                "Pentagon reports its title before init");
+        check("Scorpion ZS-256".equals(new dsp.drivers.computers.ZxClone.Scorpion256().title()),
+                "Scorpion reports its title before init");
+    }
+
+    private static void testSpectrum48UlaBorder() {
+        try {
+            java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("jdsp-spec48");
+            byte[] rom = new byte[0x4000];
+            rom[0] = (byte) 0xf3;
+            rom[1] = 0x3e;
+            rom[2] = 0x02;
+            rom[3] = (byte) 0xd3;
+            rom[4] = (byte) 0xfe;
+            rom[5] = 0x18;
+            rom[6] = (byte) 0xfe;
+            java.nio.file.Files.write(dir.resolve("48.rom"), rom);
+            dsp.drivers.computers.Spectrum48k machine = new dsp.drivers.computers.Spectrum48k();
+            StringBuilder error = new StringBuilder();
+            check(machine.init(dir.toString(), error), "synthetic 48K ROM loads: " + error);
+            dsp.core.MachineInputs inputs = new dsp.core.MachineInputs();
+            for (int frame = 0; frame < 8; frame++) {
+                machine.setInputs(inputs);
+                machine.runFrame();
+            }
+            int red = 0;
+            for (int pixel : machine.framebuffer()) {
+                if ((pixel & 0x00ffffff) == 0x00c00000) {
+                    red++;
+                }
+            }
+            check(red > 1000, "ULA paints the red border from OUT ($FE),2 (" + red + " pixels)");
+            java.nio.file.Files.deleteIfExists(dir.resolve("48.rom"));
+            java.nio.file.Files.deleteIfExists(dir);
+        } catch (Exception e) {
+            check(false, "synthetic 48K ULA test threw " + e);
+        }
+    }
+
+    private static void testSpectrum48Boot(String romPath) {
+        dsp.drivers.computers.Spectrum48k machine = new dsp.drivers.computers.Spectrum48k();
+        StringBuilder error = new StringBuilder();
+        check(machine.init(romPath, error), "Spectrum 48K loads its ROM: " + error);
+        if (failed != 0 && error.length() > 0) {
+            return;
+        }
+        dsp.core.MachineInputs inputs = new dsp.core.MachineInputs();
+        for (int frame = 0; frame < 100; frame++) {
+            machine.setInputs(inputs);
+            machine.runFrame();
+        }
+        int coloured = 0;
+        for (int pixel : machine.framebuffer()) {
+            if ((pixel & 0x00ffffff) != 0) {
+                coloured++;
+            }
+        }
+        check(coloured > 1000, "Spectrum 48K copyright screen has visible pixels (" + coloured + ")");
+        check(machine.usesKeyboard(), "Spectrum 48K uses the host keyboard");
+        check(machine.screenWidth() == 352 && machine.screenHeight() == 280,
+                "Spectrum 48K framebuffer is 352x280");
     }
 
     private static void put(int[] memory, int offset, int... bytes) {
