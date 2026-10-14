@@ -57,6 +57,8 @@ public final class Tests {
         testSpectrumSna48k();
         testSpectrumDriverRegistration();
         testSpectrum48UlaBorder();
+        testFilmationIsometricBrickBitmap();
+        testFilmationBrickOnSpectrum48();
         String spectrumRom = firstEnv("SPECTRUM48_ROM", "JDSP_SPECTRUM48_ROM");
         if (spectrumRom != null && !spectrumRom.isBlank()
                 && java.nio.file.Files.exists(java.nio.file.Path.of(spectrumRom))) {
@@ -745,6 +747,148 @@ public final class Tests {
         check(machine.usesKeyboard(), "Spectrum 48K uses the host keyboard");
         check(machine.screenWidth() == 352 && machine.screenHeight() == 280,
                 "Spectrum 48K framebuffer is 352x280");
+    }
+
+    /**
+     * The Filmation demo at {@code asm/filmation.bin} paints solid isometric cubes
+     * into the 48K bitmap. Brick (1,1,0) has its top vertex at (128, 44).
+     */
+    private static void testFilmationIsometricBrickBitmap() {
+        byte[] bin = readFilmationBin();
+        if (bin == null) {
+            return;
+        }
+        int[] memory = makeMemory();
+        for (int i = 0; i < bin.length; i++) {
+            memory[0x8000 + i] = bin[i] & 0xff;
+        }
+        Z80 cpu = new Z80(3_500_000);
+        cpu.setMemoryHandlers(address -> memory[address & 0xffff],
+                (address, value) -> memory[address & 0xffff] = value & 0xff);
+        cpu.setIoHandlers(port -> ((port & 0xff) == 0x1f) ? 0x00 : 0xff, (port, value) -> {});
+        cpu.reset();
+        cpu.setPc(0x8000);
+        cpu.sp = 0xff00;
+        boolean done = false;
+        for (int step = 0; step < 400 && !done; step++) {
+            cpu.run(20_000);
+            done = memory[0x9c00] == 1;
+        }
+        check(done, "Filmation demo sets done_flag after painting the scene");
+        if (!done) {
+            return;
+        }
+        int ink = countInk(memory);
+        check(ink > 400, "isometric bricks set ink pixels in the bitmap (" + ink + ")");
+        // Isolated demo brick at world (1,1,0): sx=128, sy=44
+        check(spectrumPixel(memory, 128, 44), "top vertex of brick (1,1,0) is ink");
+        check(spectrumPixel(memory, 128, 53), "top face interior of brick (1,1,0) is ink");
+        check(spectrumPixel(memory, 120, 60), "left face interior of brick (1,1,0) is ink");
+        check(spectrumPixel(memory, 133, 60), "right face interior of brick (1,1,0) is ink");
+        check(spectrumPixel(memory, 112, 52), "left corner of the top diamond is ink");
+        check(spectrumPixel(memory, 144, 52), "right corner of the top diamond is ink");
+        // Taller stack at (3,3,z): the z=2 cube sits above z=0/1
+        int sx = 128 + (3 - 3) * 16;
+        int sy = 28 + (3 + 3) * 8 - 2 * 16;
+        check(spectrumPixel(memory, sx, sy), "top of the stacked brick (3,3,2) is ink");
+        check(memory[0x5800] == 0x46, "attributes are bright yellow on black");
+    }
+
+    private static void testFilmationBrickOnSpectrum48() {
+        byte[] sna = readFilmationSna();
+        if (sna == null) {
+            return;
+        }
+        try {
+            java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("jdsp-filmation");
+            java.nio.file.Path rom = dir.resolve("48.rom");
+            java.nio.file.Path snap = dir.resolve("filmation.sna");
+            java.nio.file.Files.write(rom, new byte[0x4000]);
+            java.nio.file.Files.write(snap, sna);
+            dsp.drivers.computers.Spectrum48k machine = new dsp.drivers.computers.Spectrum48k();
+            StringBuilder error = new StringBuilder();
+            check(machine.init(dir.toString(), error), "Filmation dummy 48K ROM loads: " + error);
+            check(machine.loadMedia(snap.toString(), error), "Filmation SNA loads: " + error);
+            dsp.core.MachineInputs inputs = new dsp.core.MachineInputs();
+            for (int frame = 0; frame < 120; frame++) {
+                machine.setInputs(inputs);
+                machine.runFrame();
+            }
+            int yellow = countBrightYellow(machine.framebuffer());
+            check(yellow > 400, "Spectrum 48K shows the isometric brick in bright yellow (" + yellow + ")");
+            // Place another solid brick at the cursor with SPACE, then wait for the redraw
+            inputs.keys[dsp.core.Key.SPACE.ordinal()] = true;
+            for (int frame = 0; frame < 2; frame++) {
+                machine.setInputs(inputs);
+                machine.runFrame();
+            }
+            inputs.keys[dsp.core.Key.SPACE.ordinal()] = false;
+            for (int frame = 0; frame < 120; frame++) {
+                machine.setInputs(inputs);
+                machine.runFrame();
+            }
+            int after = countBrightYellow(machine.framebuffer());
+            check(after > yellow, "SPACE paints an extra solid brick (" + yellow + " -> " + after + ")");
+            java.nio.file.Files.deleteIfExists(snap);
+            java.nio.file.Files.deleteIfExists(rom);
+            java.nio.file.Files.deleteIfExists(dir);
+        } catch (Exception e) {
+            check(false, "Filmation Spectrum 48K test threw " + e);
+        }
+    }
+
+    private static byte[] readFilmationBin() {
+        return readRepoFile("asm/filmation.bin");
+    }
+
+    private static byte[] readFilmationSna() {
+        return readRepoFile("asm/filmation.sna");
+    }
+
+    private static byte[] readRepoFile(String relative) {
+        java.nio.file.Path path = java.nio.file.Path.of(relative);
+        if (!java.nio.file.Files.isRegularFile(path)) {
+            path = java.nio.file.Path.of("..", relative);
+        }
+        if (!java.nio.file.Files.isRegularFile(path)) {
+            check(false, relative + " is missing (run python3 tools/z80asm.py asm/filmation.asm)");
+            return null;
+        }
+        try {
+            return java.nio.file.Files.readAllBytes(path);
+        } catch (java.io.IOException e) {
+            check(false, "cannot read " + relative + ": " + e);
+            return null;
+        }
+    }
+
+    private static int spectrumOffset(int x, int y) {
+        int h = 0x40 | ((y & 0xc0) >> 3) | (y & 7);
+        int l = ((y & 0x38) << 2) | (x >> 3);
+        return ((h << 8) | l) - 0x4000;
+    }
+
+    private static boolean spectrumPixel(int[] memory, int x, int y) {
+        int bit = 0x80 >> (x & 7);
+        return (memory[0x4000 + spectrumOffset(x, y)] & bit) != 0;
+    }
+
+    private static int countInk(int[] memory) {
+        int ink = 0;
+        for (int addr = 0x4000; addr < 0x5800; addr++) {
+            ink += Integer.bitCount(memory[addr] & 0xff);
+        }
+        return ink;
+    }
+
+    private static int countBrightYellow(int[] framebuffer) {
+        int yellow = 0;
+        for (int pixel : framebuffer) {
+            if ((pixel & 0x00ffffff) == 0x00ffff00) {
+                yellow++;
+            }
+        }
+        return yellow;
     }
 
     private static void put(int[] memory, int offset, int... bytes) {

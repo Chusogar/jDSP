@@ -6,7 +6,7 @@ SRC    = $(shell find src/main/java -name '*.java')
 OUT    = target/classes
 JARFILE = target/jdsp.jar
 
-.PHONY: all classes jar test screenshot clean
+.PHONY: all classes jar test screenshot clean filmation
 
 all: jar
 
@@ -17,7 +17,10 @@ classes:
 jar: classes
 	$(JAR) cfe $(JARFILE) dsp.Main -C $(OUT) .
 
-test: classes
+filmation:
+	python3 tools/z80asm.py asm/filmation.asm
+
+test: classes filmation
 	$(JAVA) -cp $(OUT) dsp.Tests
 
 screenshot: jar
@@ -26,5 +29,10 @@ screenshot: jar
 screenshot-pirates: jar
 	$(JAVA) -jar $(JARFILE) --game pirates --screenshot pirates.bmp --frames 300 --mute $(ROM)
 
+screenshot-filmation: jar filmation
+	mkdir -p /tmp/specrom
+	python3 -c "from pathlib import Path; p=Path('/tmp/specrom/48.rom'); p.write_bytes(bytes(16384)) if not p.exists() else None"
+	$(JAVA) -jar $(JARFILE) --game spectrum48 --screenshot filmation.bmp --frames 150 --mute /tmp/specrom --tape asm/filmation.sna
+
 clean:
-	rm -rf target bagman.bmp pirates.bmp
+	rm -rf target bagman.bmp pirates.bmp filmation.bmp

@@ -147,3 +147,29 @@ Put the machine ROM in a directory (or pass the `.rom` file itself):
 Tapes (`.tap` / `.tzx`), snapshots (`.sna` / `.z80`), RZX recordings, +3 disks
 (`.dsk`) and Beta 128 disks (`.trd` / `.scl`) load with `--tape` / `--disk`
 or as extra media after the ROM path.
+
+### Filmation isometric brick (Z80)
+
+`asm/filmation.asm` is a 48K program that paints solid 3D cubes with the classic
+Filmation / Knight Lore projection (2:1 isometric, three visible faces, vertical
+side edges). A small staircase and wall are placed at startup; you can move a
+ghost cursor and drop more bricks.
+
+![Filmation isometric brick on ZX Spectrum 48K](screenshots/filmation_brick.png)
+
+```bash
+make filmation
+java -jar target/jdsp.jar --game spectrum48 /path/to/spectrum/roms --tape asm/filmation.sna
+```
+
+On a real Spectrum, `LOAD ""` the TAP (it auto-runs via BASIC) or
+`RANDOMIZE USR 32768` after loading the CODE block.
+
+| Key | Action |
+| --- | --- |
+| O / P or 5 / 4 | move X |
+| Q / A or 7 / 6 | move Y |
+| W / S | up / down Z |
+| SPACE or Kempston fire | place a solid brick |
+| M | delete |
+| 0 | clear the world |
