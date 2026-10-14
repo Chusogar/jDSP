@@ -13,3 +13,5 @@ sources.txt
 .settings/
 roms/
 __pycache__/
+asm/*.lst
+asm/*.sym
